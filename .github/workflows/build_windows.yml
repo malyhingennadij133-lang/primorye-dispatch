@@ -1,0 +1,44 @@
+name: Build Dispatch Windows EXE
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Prepare Flutter Windows project and build EXE
+        shell: pwsh
+        run: |
+          Copy-Item lib/main.dart $env:TEMP/main_backup.dart
+          Remove-Item -Recurse -Force lib
+          flutter create --platforms=windows --org ru.primorye --project-name primorye_dispatch .
+          flutter pub add http
+          $code = Get-Content -Raw -Encoding UTF8 $env:TEMP/main_backup.dart
+          $code = $code.Replace("import 'dart:html' as html;", "import 'package:http/http.dart' as http;")
+          $code = $code.Replace("html.HttpRequest.request(", "_desktopHttp(")
+          $helper = @'
+
+          class _FakeResp { final int status; final String? responseText; _FakeResp(this.status, this.responseText); }
+          Future<_FakeResp> _desktopHttp(String url, {String method = 'GET', Map<String, String>? requestHeaders, String? sendData}) async {
+            final uri = Uri.parse(url);
+            http.Response r;
+            if (method == 'POST') r = await http.post(uri, headers: requestHeaders, body: sendData);
+            else if (method == 'PATCH') r = await http.patch(uri, headers: requestHeaders, body: sendData);
+            else r = await http.get(uri, headers: requestHeaders);
+            return _FakeResp(r.statusCode, r.body);
+          }
+          '@
+          Set-Content -Path lib/main.dart -Value ($code + $helper) -Encoding UTF8
+          flutter pub get
+          flutter build windows --release
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Primorye-Dispatch-Windows-EXE
+          path: build/windows/x64/runner/Release/
