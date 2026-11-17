@@ -1,15 +1,12 @@
 import 'dart:convert';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
-
 void main() => runApp(const PrimoryeDispatchApp());
+const String kSupabaseUrl = 'https://irwfyswmawiamejmisjg.supabase.co';
 
-const String kSupabaseUrl = 'https://supabase.co';
 const String kSupabaseKey = 'sb_publishable_9Y3IES6sn7s1onvGlkCaNg_hsISZNc1';
-
 class PrimoryeDispatchApp extends StatelessWidget {
   const PrimoryeDispatchApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
