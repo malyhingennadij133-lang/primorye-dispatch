@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:html' as html;
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -71,19 +71,31 @@ class _DispatchTerminalScreenState extends State<DispatchTerminalScreen> {
     _syncCloud();
   }
 
-  Map<String, String> get _headers => {
-    'apikey': sbKey,
-    'Authorization': 'Bearer $sbKey',
-    'Content-Type': 'application/json',
-    'Prefer': 'return=representation',
-  };
+  Future<String> _httpCall(String method, String path, {String? body}) async {
+    final client = HttpClient();
+    try {
+      final req = await client.openUrl(method, Uri.parse('$sbUrl/rest/v1/$path'));
+      req.headers.set('apikey', sbKey);
+      req.headers.set('Authorization', 'Bearer $sbKey');
+      req.headers.set('Content-Type', 'application/json');
+      req.headers.set('Prefer', 'return=representation');
+      if (body != null) {
+        req.add(utf8.encode(body));
+      }
+      final res = await req.close();
+      return await res.transform(utf8.decoder).join();
+    } catch (_) {
+      return '[]';
+    } finally {
+      client.close();
+    }
+  }
 
   Future<List<Map<String, dynamic>>> _fetch(String query) async {
     try {
-      final r = await html.HttpRequest.request('$sbUrl/rest/v1/$query', method: 'GET', requestHeaders: _headers);
-      if (r.status == 200 && r.responseText != null) {
-        return List<Map<String, dynamic>>.from(jsonDecode(r.responseText!));
-      }
+      final raw = await _httpCall('GET', query);
+      final decoded = jsonDecode(raw);
+      if (decoded is List) return List<Map<String, dynamic>>.from(decoded);
     } catch (_) {}
     return [];
   }
@@ -151,8 +163,7 @@ class _DispatchTerminalScreenState extends State<DispatchTerminalScreen> {
       'total_sum': _calculatedTotal,
       'status': 'Открыт',
     };
-    await html.HttpRequest.request('$sbUrl/rest/v1/orders',
-        method: 'POST', requestHeaders: _headers, sendData: jsonEncode(payload));
+    await _httpCall('POST', 'orders', body: jsonEncode(payload));
     _addressCtrl.clear();
     _commentCtrl.clear();
     await _syncCloud();
@@ -164,11 +175,10 @@ class _DispatchTerminalScreenState extends State<DispatchTerminalScreen> {
     final need = (o['needed_workers'] ?? 1) as int;
     final isClosed = hired >= need;
     if (id != null) {
-      await html.HttpRequest.request(
-        '$sbUrl/rest/v1/orders?id=eq.$id',
-        method: 'PATCH',
-        requestHeaders: _headers,
-        sendData: jsonEncode({
+      await _httpCall(
+        'PATCH',
+        'orders?id=eq.$id',
+        body: jsonEncode({
           'hired_workers': hired,
           'status': isClosed ? 'Закрыт (набран)' : 'Идёт набор',
         }),
@@ -177,9 +187,8 @@ class _DispatchTerminalScreenState extends State<DispatchTerminalScreen> {
     }
   }
 
-  void _openWaybillPrintWindow(Map<String, dynamic> o) {
-    final win = html.window.open('', 'waybill', 'width=900,height=650');
-    final doc = '''
+  Future<void> _saveAndOpenWaybill(Map<String, dynamic> o) async {
+    final htmlDoc = '''
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>Маршрутный лист №${o['id']}</title>
 <style>body{font-family:Arial,sans-serif;padding:24px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{border:1px solid #000;padding:8px;text-align:left}</style>
 </head><body onload="window.print()">
@@ -192,8 +201,9 @@ class _DispatchTerminalScreenState extends State<DispatchTerminalScreen> {
 </table>
 <p style="margin-top:30px">Диспетчер: _______________ &nbsp;&nbsp;&nbsp; Водитель / Бригадир: _______________ &nbsp;&nbsp;&nbsp; Заказчик: _______________</p>
 </body></html>''';
-    (win as dynamic).document.write(doc);
-    (win as dynamic).document.close();
+    final path = '${Directory.systemTemp.path}\\waybill_${o['id']}.html';
+    await File(path).writeAsString(htmlDoc);
+    await Process.run('cmd', ['/c', 'start', '', path]);
   }
   @override
   Widget build(BuildContext context) {
@@ -373,7 +383,7 @@ class _DispatchTerminalScreenState extends State<DispatchTerminalScreen> {
                 IconButton(
                   tooltip: 'Печать маршрутного листа (ХИНО С 738 СВ 125)',
                   icon: const Icon(Icons.print, color: Colors.lightBlueAccent),
-                  onPressed: () => _openWaybillPrintWindow(o),
+                  onPressed: () => _saveAndOpenWaybill(o),
                 ),
               ],
             ),
